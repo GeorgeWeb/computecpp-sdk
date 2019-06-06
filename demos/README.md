@@ -32,7 +32,7 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCINDER_BOOST_USE_SYSTEM=1 ..
 make
 ```
 
-Then change navigate to the `Cinder-ImGui` folder where you have to change the commit head of the `imgui` dependency. \
+Then navigate to the `Cinder-ImGui` folder where you have to change the commit of the `imgui` dependency. \
 After `cd lib/imgui`, checkout the working commit as follows:
 
 ```
