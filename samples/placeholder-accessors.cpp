@@ -36,45 +36,60 @@ class Worker;
 }
 
 class Doubler {
+  /* These are placeholder accessors a class members so they are visible to both
+   * perform_doubling and operator(). As placeholder accessors, they do not have
+   * a buffer associated with them yet. It will be attached during the command
+   * group */
+  using in_placeholder_acc_t =
+      accessor<const uint8_t, 1, access::mode::read,
+               access::target::global_buffer, access::placeholder::true_t>;
+  using out_placeholder_acc_t =
+      accessor<uint8_t, 1, access::mode::discard_write,
+               access::target::global_buffer, access::placeholder::true_t>;
+  in_placeholder_acc_t in_accessor;
+  out_placeholder_acc_t out_accessor;
+
  public:
   void perform_doubling(const uint8_t* input, uint8_t* output, size_t items) {
     try {
       queue myQueue;
 
-      /* Create buffers from the provided pointers. */
+      /* Create buffers from the provided pointers */
       auto in_buffer = buffer<const uint8_t, 1>(input, items);
       auto out_buffer = buffer<uint8_t, 1>(output, items);
 
-      /* These are placeholder accessors, they do not have a buffer associated
-       * with them yet. It will be attached during the command group. The SYCL
-       * buffers will be alive for as long as this accessor is alive*/
-      auto in_accessor =
-          accessor<const uint8_t, 1, access::mode::read,
-                   access::target::global_buffer, access::placeholder::true_t>{
-              in_buffer};
-      auto out_accessor =
-          accessor<uint8_t, 1, access::mode::discard_write,
-                   access::target::global_buffer, access::placeholder::true_t>{
-              out_buffer};
+      in_accessor = in_placeholder_acc_t{in_buffer};
+      out_accessor = out_placeholder_acc_t{out_buffer};
 
       myQueue.submit([&](handler& cgh) {
-        /* Associate buffers with the accessors. */
+        /* Associate buffers with the accessors */
         cgh.require(in_accessor);
         cgh.require(out_accessor);
 
-        /* The accessors can now be used to access the buffers. */
-        cgh.parallel_for<Worker>(range<1>(items), [=](item<1> item) {
-          out_accessor[item] = in_accessor[item] * 2;
-        });
+        /* The accessors can now be used to access the buffers created above */
+        cgh.parallel_for<Worker>(range<1>(items), *this);
       });
+      // explicitly wait for memory operations to finish
+      myQueue.wait_and_throw();
+      // test results via host accessor
+      {
+        std::cout << "Results from host accessor\n";
+        auto host_acc = out_buffer.get_access<access::mode::read_write>();
+        for (size_t i = 0; i < items; i++) {
+          std::cout << static_cast<int>(host_acc[i]) << " ";
+        }
+        std::cout << "\n";
+      }
     } catch (const exception& e) {
       std::cerr << "SYCL exception caught: " << e.what() << "\n";
       throw;
     }
   }
+
+  void operator()(item<1> item) { out_accessor[item] = in_accessor[item] * 2; }
 };
 
-/* Input data, and array length. */
+/* Input data, and array length */
 constexpr size_t num_items = 10;
 const std::array<uint8_t, num_items> values = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
@@ -85,11 +100,17 @@ int main() {
   doubler.perform_doubling(values.data(), output.data(), num_items);
 
   /* We check that the result is correct. */
+  std::cout << "Results from host array\n";
+  for (auto value : output) {
+    std::cout << static_cast<int>(value) << " ";
+  }
+  std::cout << "\n";
   if (!std::equal(
           output.begin(), output.end(), values.begin(),
-          [](const uint8_t out, const uint8_t in) { return out == in * 2; })) {
+          [](const auto out, const auto in) { return out == in * 2; })) {
     std::cerr << "Resulting output is wrong!\n";
     return 1;
   }
+
   return 0;
 }
